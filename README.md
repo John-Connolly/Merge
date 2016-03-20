@@ -15,3 +15,10 @@ Overlay transparent PNG images on top of other images or videos!  This is useful
             }
         }
 ```
+##### Overlay a video and an Image.
+
+```swift
+ Overlay.mergeVideoAndImage(AVURLAsset, overlay: CALayer) { (url) -> () in
+            // update some UI
+        }
+```
