@@ -9,7 +9,7 @@ Overlay transparent PNG images on top of other images or videos!  This is useful
 ##### Overlay Images.
 
 ```swift
- Overlay.merge(bottomImage: UIImage, topImage: UIImage, size: CGSize) { (image) -> () in
+ Merge.mergeImages(bottomImage: UIImage, topImage: UIImage, size: CGSize) { (image) -> () in
             dispatch_async(dispatch_get_main_queue()) {
                 // update some UI
             }
@@ -18,7 +18,7 @@ Overlay transparent PNG images on top of other images or videos!  This is useful
 ##### Overlay a video and an Image.
 
 ```swift
- Overlay.mergeVideoAndImage(AVURLAsset, overlay: CALayer) { (url) -> () in
+ Merge.mergeVideoAndImage(AVURLAsset, overlay: CALayer) { (url) -> () in
             // update some UI
         }
 ```
