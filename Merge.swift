@@ -6,13 +6,6 @@
 //
 //
 
-//
-//  Merge.swift
-//  Overlay
-//
-//  Created by John Connolly on 2016-03-20.
-//  Copyright © 2016 John Connolly. All rights reserved.
-//
 
 import Foundation
 import AVKit
