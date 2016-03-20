@@ -22,3 +22,8 @@ Overlay transparent PNG images on top of other images or videos!  This is useful
             // update some UI
         }
 ```
+
+
+##### Installation
+Just drag Merge.swift to the project tree
+
