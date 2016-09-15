@@ -7,6 +7,7 @@ Work in Progress
 ##### What is it?
 Overlay transparent PNG images on top of other images or videos!  This is useful for apps that need to watermark images or videos, or Snapchat like apps where a user can draw on top of an image or video.  
 
+Used in https://itunes.apple.com/us/app/.gif/id1061699394?ls=1&mt=8 check it out!
 
 ##### Overlay Images.
 
