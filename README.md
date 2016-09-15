@@ -1,4 +1,4 @@
-![Merge](https://cloud.githubusercontent.com/assets/8390081/18536171/bc6c3c06-7ac8-11e6-8a4c-f013410d942b.png)
+![Merge](https://cloud.githubusercontent.com/assets/8390081/18536861/c9860614-7ace-11e6-8864-d223d0827fa8.png)
 
 # Merge
 
