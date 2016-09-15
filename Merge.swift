@@ -1,18 +1,16 @@
 //
 //  Merge.swift
-//  
+//
 //
 //  Created by John Connolly on 2016-03-20.
 //
 //
 
-
 import Foundation
 import AVKit
 import AVFoundation
 
-
-class Merge {
+final class Merge {
     
     private static let priority = DISPATCH_QUEUE_PRIORITY_DEFAULT
     
@@ -27,71 +25,70 @@ class Merge {
         }
     }
     
-    
-    static func mergeVideoAndImage(asset: AVURLAsset, overlay: CALayer, complete: (url: NSURL) -> ()) {
-        let composition = AVMutableComposition()
-        let compositionVideoTrack = composition.addMutableTrackWithMediaType(AVMediaTypeVideo, preferredTrackID:0)
-        let timeRange:CMTimeRange = CMTimeRangeMake(kCMTimeZero, asset.duration)
-        let videoTrack:AVAssetTrack = asset.tracksWithMediaType(AVMediaTypeVideo)[0] as AVAssetTrack
-        
+    static func overlayVideo(video: AVAsset, overlayImage: UIImage, completion: (URL: NSURL?) -> ()) {
+        let mixComposition = AVMutableComposition()
+        let videoTrack: AVMutableCompositionTrack = mixComposition.addMutableTrackWithMediaType(AVMediaTypeVideo, preferredTrackID: Int32(kCMPersistentTrackID_Invalid))
         do {
-            try compositionVideoTrack.insertTimeRange(timeRange, ofTrack: videoTrack, atTime: kCMTimeZero)
+            try videoTrack.insertTimeRange(CMTimeRangeMake(kCMTimeZero, video.duration), ofTrack: video.tracksWithMediaType(AVMediaTypeVideo)[0], atTime: kCMTimeZero)
         } catch {
             print(error)
         }
-        
-        let instruction = AVMutableVideoCompositionInstruction()
-        instruction.timeRange = timeRange
-        
-        let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: compositionVideoTrack)
-        let videoSize:CGSize = getVideoSize(videoTrack)
-        instruction.layerInstructions = [layerInstruction]
-        
-        let parentLayer:CALayer = CALayer()
-        let videoLayer:CALayer = CALayer()
-        parentLayer.frame = CGRectMake(0, 0, videoSize.width, videoSize.height)
-        videoLayer.frame = CGRectMake(0, 0, videoSize.width, videoSize.height)
-        overlay.frame = videoLayer.frame
-        parentLayer.addSublayer(videoLayer)
-        parentLayer.addSublayer(overlay)
-        
-        let videoComposition = AVMutableVideoComposition()
-        videoComposition.animationTool = AVVideoCompositionCoreAnimationTool(postProcessingAsVideoLayer: videoLayer, inLayer: parentLayer)
-        videoComposition.renderSize = CGSizeMake(videoSize.width, videoSize.height)
-        videoComposition.instructions = [instruction]
-        videoComposition.frameDuration = CMTimeMake(1, 30)
-        
-        let session:AVAssetExportSession = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetMediumQuality)!
-        session.videoComposition = videoComposition
-        session.outputURL = NSURL.fileURLWithPath(getFilePath() as String)
-        session.outputFileType = AVFileTypeMPEG4
-        session.exportAsynchronouslyWithCompletionHandler({
-            dispatch_async(dispatch_get_main_queue(), {
-                if session.status == AVAssetExportSessionStatus.Completed {
-                    complete(url: session.outputURL!)
-                } else {
-                    print("fail:(")
-                }
+        let mainInstruction = AVMutableVideoCompositionInstruction()
+        mainInstruction.timeRange = CMTimeRangeMake(kCMTimeZero, video.duration)
+        let videoLayerIntruction = AVMutableVideoCompositionLayerInstruction(assetTrack: videoTrack)
+        let videoAssetTrack: AVAssetTrack = video.tracksWithMediaType(AVMediaTypeVideo)[0]
+        var isVideoAssetPortrait = false
+        let videoTransform:CGAffineTransform = videoAssetTrack.preferredTransform
+        if videoTransform.a == 0 && videoTransform.b == 1.0 && videoTransform.c == -1.0 && videoTransform.d == 0 {
+            isVideoAssetPortrait = true
+        }
+        if videoTransform.a == 0 && videoTransform.b == -1.0 && videoTransform.c == 1.0 && videoTransform.d == 0 {
+            isVideoAssetPortrait = true
+        }
+        videoLayerIntruction.setTransform(videoAssetTrack.preferredTransform, atTime: kCMTimeZero)
+        videoLayerIntruction.setOpacity(0.0, atTime: video.duration)
+        mainInstruction.layerInstructions = [videoLayerIntruction]
+        let mainCompositionInstruction = AVMutableVideoComposition()
+        var naturalSize = CGSize()
+        if isVideoAssetPortrait {
+            naturalSize = CGSizeMake(videoAssetTrack.naturalSize.height, videoAssetTrack.naturalSize.width)
+        } else {
+            naturalSize = videoAssetTrack.naturalSize
+        }
+        var renderWidth, renderHeight: CGFloat
+        renderWidth = naturalSize.width
+        renderHeight = naturalSize.height
+        mainCompositionInstruction.renderSize = CGSizeMake(renderWidth, renderHeight)
+        mainCompositionInstruction.instructions = [mainInstruction]
+        mainCompositionInstruction.frameDuration = CMTimeMake(1, 30)
+        self.applyVideoEffectsToComposition(mainCompositionInstruction, size: naturalSize, overlayImage: overlayImage)
+        let paths = NSSearchPathForDirectoriesInDomains(.DocumentDirectory, .UserDomainMask, true)
+        let documentsDirectory = paths[0]
+        let myPathDocs = documentsDirectory + "/export\(NSUUID().UUIDString).mov"
+        let url = NSURL(fileURLWithPath: myPathDocs)
+        let exporter = AVAssetExportSession(asset: mixComposition, presetName: AVAssetExportPresetHighestQuality)
+        exporter?.outputURL = url
+        exporter?.outputFileType = AVFileTypeQuickTimeMovie
+        exporter?.shouldOptimizeForNetworkUse = true
+        exporter?.videoComposition = mainCompositionInstruction
+        exporter?.exportAsynchronouslyWithCompletionHandler({
+            dispatch_async(dispatch_get_main_queue(),{
+                completion(URL: exporter?.outputURL)
             })
         })
     }
     
-    private static func getVideoSize(videoTrack:AVAssetTrack) -> CGSize {
-        var videoSize = videoTrack.naturalSize
-        let transform:CGAffineTransform = videoTrack.preferredTransform
-        if transform.a == 0 && transform.d == 0 && transform.b == 1.0 || transform.b == -1.0 && transform.c == 1.0 || transform.c == -1.0 {
-            videoSize = CGSizeMake(videoSize.height, videoSize.width)
-        }
-        return videoSize
-    }
-    
-    private static func getFilePath() -> NSString {
-        let date = NSDate().timeIntervalSince1970
-        let filePath:NSString = (NSTemporaryDirectory() as NSString).stringByAppendingPathComponent("file\(date).mp4")
-        return filePath
+    private static func applyVideoEffectsToComposition(composition: AVMutableVideoComposition, size: CGSize, overlayImage: UIImage) {
+        let overlayLayer = CALayer()
+        overlayLayer.contents = overlayImage.CGImage
+        overlayLayer.frame = CGRectMake(0, 0, size.width, size.height)
+        overlayLayer.masksToBounds = true
+        let parentLayer = CALayer()
+        let videoLayer = CALayer()
+        parentLayer.frame = CGRectMake(0, 0, size.width, size.height)
+        videoLayer.frame = CGRectMake(0, 0, size.width, size.height)
+        parentLayer.addSublayer(videoLayer)
+        parentLayer.addSublayer(overlayLayer)
+        composition.animationTool = AVVideoCompositionCoreAnimationTool(postProcessingAsVideoLayer: videoLayer, inLayer: parentLayer)
     }
 }
-
-
-
-
