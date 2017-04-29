@@ -13,16 +13,16 @@ Merge is initialized with a configuration struct that is open for extension. Sim
 
 ```swift
 struct MergeConfiguration {
-let frameRate: Int32
-let directory: String
-let quality: Quality
-let placement: Placement
+  let frameRate: Int32
+  let directory: String
+  let quality: Quality
+  let placement: Placement
 }
 
 extension MergeConfiguration {
-static var standard: MergeConfiguration {
-return MergeConfiguration(frameRate: 30, directory: NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0], quality: Quality.high, placement: Placement.stretchFit)
-}
+  static var standard: MergeConfiguration {
+    return MergeConfiguration(frameRate: 30, directory: NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0], quality: Quality.high, placement: Placement.stretchFit)
+  }
 }
 ```
 #### Placement
