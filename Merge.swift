@@ -12,83 +12,292 @@ import AVFoundation
 
 final class Merge {
     
-    private static let priority = DISPATCH_QUEUE_PRIORITY_DEFAULT
+    fileprivate let configuration: MergeConfiguration
     
-    static func mergeImages(bottomImage: UIImage, topImage: UIImage, size: CGSize, complete: (image: UIImage) -> ()) {
-        dispatch_async(dispatch_get_global_queue(priority, 0)) {
-            UIGraphicsBeginImageContextWithOptions(size, false, 0.0)
-            bottomImage.drawInRect(CGRect(origin: .zero, size: size))
-            topImage.drawInRect(CGRect(origin: .zero, size: size))
-            let newImage = UIGraphicsGetImageFromCurrentImageContext()
-            UIGraphicsEndImageContext()
-            complete(image: newImage)
-        }
+    init(config: MergeConfiguration) {
+        self.configuration = config
     }
     
-    static func overlayVideo(video: AVAsset, overlayImage: UIImage, completion: (URL: NSURL?) -> ()) {
-        let mixComposition = AVMutableComposition()
-        let videoTrack: AVMutableCompositionTrack = mixComposition.addMutableTrackWithMediaType(AVMediaTypeVideo, preferredTrackID: Int32(kCMPersistentTrackID_Invalid))
-        do {
-            try videoTrack.insertTimeRange(CMTimeRangeMake(kCMTimeZero, video.duration), ofTrack: video.tracksWithMediaType(AVMediaTypeVideo)[0], atTime: kCMTimeZero)
-        } catch {
-            print(error)
-        }
-        let mainInstruction = AVMutableVideoCompositionInstruction()
-        mainInstruction.timeRange = CMTimeRangeMake(kCMTimeZero, video.duration)
-        let videoLayerIntruction = AVMutableVideoCompositionLayerInstruction(assetTrack: videoTrack)
-        let videoAssetTrack: AVAssetTrack = video.tracksWithMediaType(AVMediaTypeVideo)[0]
-        var isVideoAssetPortrait = false
-        let videoTransform:CGAffineTransform = videoAssetTrack.preferredTransform
-        if videoTransform.a == 0 && videoTransform.b == 1.0 && videoTransform.c == -1.0 && videoTransform.d == 0 {
-            isVideoAssetPortrait = true
-        }
-        if videoTransform.a == 0 && videoTransform.b == -1.0 && videoTransform.c == 1.0 && videoTransform.d == 0 {
-            isVideoAssetPortrait = true
-        }
-        videoLayerIntruction.setTransform(videoAssetTrack.preferredTransform, atTime: kCMTimeZero)
-        videoLayerIntruction.setOpacity(0.0, atTime: video.duration)
-        mainInstruction.layerInstructions = [videoLayerIntruction]
-        let mainCompositionInstruction = AVMutableVideoComposition()
-        var naturalSize = CGSize()
-        if isVideoAssetPortrait {
-            naturalSize = CGSizeMake(videoAssetTrack.naturalSize.height, videoAssetTrack.naturalSize.width)
-        } else {
-            naturalSize = videoAssetTrack.naturalSize
-        }
-        var renderWidth, renderHeight: CGFloat
-        renderWidth = naturalSize.width
-        renderHeight = naturalSize.height
-        mainCompositionInstruction.renderSize = CGSizeMake(renderWidth, renderHeight)
-        mainCompositionInstruction.instructions = [mainInstruction]
-        mainCompositionInstruction.frameDuration = CMTimeMake(1, 30)
-        self.applyVideoEffectsToComposition(mainCompositionInstruction, size: naturalSize, overlayImage: overlayImage)
-        let paths = NSSearchPathForDirectoriesInDomains(.DocumentDirectory, .UserDomainMask, true)
-        let documentsDirectory = paths[0]
-        let myPathDocs = documentsDirectory + "/export\(NSUUID().UUIDString).mov"
-        let url = NSURL(fileURLWithPath: myPathDocs)
-        let exporter = AVAssetExportSession(asset: mixComposition, presetName: AVAssetExportPresetHighestQuality)
-        exporter?.outputURL = url
-        exporter?.outputFileType = AVFileTypeQuickTimeMovie
-        exporter?.shouldOptimizeForNetworkUse = true
-        exporter?.videoComposition = mainCompositionInstruction
-        exporter?.exportAsynchronouslyWithCompletionHandler({
-            dispatch_async(dispatch_get_main_queue(),{
-                completion(URL: exporter?.outputURL)
-            })
-        })
+    fileprivate var fileUrl: URL {
+        let fullPath = configuration.directory + "/export\(NSUUID().uuidString).mov"
+        return URL(fileURLWithPath: fullPath)
     }
     
-    private static func applyVideoEffectsToComposition(composition: AVMutableVideoComposition, size: CGSize, overlayImage: UIImage) {
+    /**
+     Overlays and exports a video with a desired UIImage on top.
+     
+     - Parameter video: AVAsset
+     - Paremeter overlayImage: UIImage
+     - Paremeter completion: Completion Handler
+     - Parameter progressHandler: Returns the progress every 500 milliseconds.
+     */
+    func overlayVideo(video: AVAsset, overlayImage: UIImage,
+                      completion: @escaping (_ URL: URL?) -> (),
+                      progressHandler: @escaping (_ progress: Float) -> ()) {
+        let composition = try! Composition(duration: video.duration, videoAsset: video.tracks(withMediaType: AVMediaTypeVideo)[0])
+        
+        let videoTrack = video.tracks(withMediaType: AVMediaTypeVideo)[0]
+        let videoTransform = Transform(videoTrack.preferredTransform)
+        let layerInstruction = LayerInstruction(track: composition.track, transform: videoTrack.preferredTransform, duration: video.duration)
+        let instruction = Instruction(length: video.duration, layerInstructions: [layerInstruction.instruction])
+        let size = Size(isPortrait: videoTransform.isPortrait, size: videoTrack.naturalSize)
+        let layer = Layer(overlay: overlayImage, size: size.naturalSize, placement: configuration.placement)
+        let videoComposition = VideoComposition(size: size.naturalSize, instruction: instruction,
+                                                frameRate: configuration.frameRate,
+                                                layer: layer
+        )
+        Exporter(asset: composition.asset, outputUrl: fileUrl, composition: videoComposition.composition, quality: configuration.quality).map { exporter in
+            exporter.render { url in
+                completion(url)
+            }
+            exporter.progress = { progress in
+                progressHandler(progress)
+            }
+            } ?? completion(nil)
+    }
+}
+
+/**
+ Determines overlay placement.
+ 
+ - stretchFit:  Stretches the ovelay to cover the entire video frame. This is ideal for
+ situations for adding drawing to a video.
+ - custom: Custom coordinates for the ovelay.
+ 
+ */
+
+enum Placement {
+    
+    case stretchFit
+    case custom(x: CGFloat, y: CGFloat, size: CGSize)
+    
+    func rect(videoSize: CGSize) -> CGRect {
+        switch self {
+        case .stretchFit: return CGRect(origin: .zero, size: videoSize)
+        case .custom(let x, let y, let size): return CGRect(x: x, y: y, width: size.width, height: size.height)
+        }
+    }
+}
+
+
+/**
+ Determines export Quality
+ 
+ - low
+ - medium
+ - high
+ */
+
+enum Quality: String {
+    
+    case low
+    case medium
+    case high
+    
+    var value: String {
+        switch self {
+        case .low: return AVAssetExportPresetLowQuality
+        case .medium: return AVAssetExportPresetMediumQuality
+        case .high: return AVAssetExportPresetHighestQuality
+        }
+    }
+}
+
+
+
+fileprivate final class LayerInstruction {
+    
+    let instruction: AVMutableVideoCompositionLayerInstruction
+    
+    init(track: AVMutableCompositionTrack, transform: CGAffineTransform, duration: CMTime) {
+        instruction = AVMutableVideoCompositionLayerInstruction(assetTrack: track)
+        instruction.setTransform(transform, at: kCMTimeZero)
+        instruction.setOpacity(0.0, at: duration)
+    }
+    
+}
+
+
+fileprivate final class Composition {
+    
+    let asset = AVMutableComposition()
+    let track: AVMutableCompositionTrack
+    
+    init(duration: CMTime, videoAsset: AVAssetTrack) throws {
+        track = asset.addMutableTrack(withMediaType: AVMediaTypeVideo,
+                                      preferredTrackID: Int32(kCMPersistentTrackID_Invalid)
+        )
+        try track.insertTimeRange(CMTimeRangeMake(kCMTimeZero, duration),
+                                  of: videoAsset,
+                                  at: kCMTimeZero)
+    }
+    
+    
+}
+
+fileprivate final class Instruction {
+    
+    let videoComposition = AVMutableVideoCompositionInstruction()
+    
+    init(length: CMTime, layerInstructions: [AVVideoCompositionLayerInstruction]) {
+        videoComposition.timeRange = CMTimeRangeMake(kCMTimeZero, length)
+        videoComposition.layerInstructions = layerInstructions
+    }
+}
+
+fileprivate final class VideoComposition {
+    
+    let composition = AVMutableVideoComposition()
+    
+    init(size: CGSize, instruction: Instruction, frameRate: Int32, layer: Layer) {
+        composition.renderSize = size
+        composition.instructions = [instruction.videoComposition]
+        composition.frameDuration = CMTimeMake(1, frameRate)
+        composition.animationTool = AVVideoCompositionCoreAnimationTool(
+            postProcessingAsVideoLayer: layer.videoAndParent.video,
+            in: layer.videoAndParent.parent
+        )
+    }
+}
+
+
+
+fileprivate final class Layer {
+    
+    fileprivate let overlay: UIImage
+    fileprivate let size: CGSize
+    fileprivate let placement: Placement
+    
+    init(overlay: UIImage, size: CGSize, placement: Placement) {
+        self.overlay = overlay
+        self.size = size
+        self.placement = placement
+    }
+    
+    fileprivate var frame: CGRect {
+        return CGRect(origin: .zero, size: size)
+    }
+    
+    fileprivate var overlayFrame: CGRect {
+        return placement.rect(videoSize: size)
+    }
+    
+    
+    lazy var videoAndParent: VideoAndParent = {
         let overlayLayer = CALayer()
-        overlayLayer.contents = overlayImage.CGImage
-        overlayLayer.frame = CGRectMake(0, 0, size.width, size.height)
+        overlayLayer.contents = self.overlay.cgImage
+        overlayLayer.frame = self.overlayFrame
         overlayLayer.masksToBounds = true
-        let parentLayer = CALayer()
+        
         let videoLayer = CALayer()
-        parentLayer.frame = CGRectMake(0, 0, size.width, size.height)
-        videoLayer.frame = CGRectMake(0, 0, size.width, size.height)
+        videoLayer.frame = self.frame
+        
+        let parentLayer = CALayer()
+        parentLayer.frame = self.frame
         parentLayer.addSublayer(videoLayer)
         parentLayer.addSublayer(overlayLayer)
-        composition.animationTool = AVVideoCompositionCoreAnimationTool(postProcessingAsVideoLayer: videoLayer, inLayer: parentLayer)
+        
+        return VideoAndParent(video: videoLayer, parent: parentLayer)
+    }()
+    
+    final class VideoAndParent {
+        let video: CALayer
+        let parent: CALayer
+        
+        init(video: CALayer, parent: CALayer) {
+            self.video = video
+            self.parent = parent
+        }
+    }
+}
+
+///  A wrapper of AVAssetExportSession.
+fileprivate final class Exporter {
+    
+    fileprivate let session: AVAssetExportSession
+    
+    var progress: ((_ progress: Float) -> ())?
+    
+    init?(asset: AVMutableComposition, outputUrl: URL, composition: AVVideoComposition, quality: Quality) {
+        guard let session = AVAssetExportSession(asset: asset, presetName: quality.value) else { return nil }
+        self.session = session
+        self.session.outputURL = outputUrl
+        self.session.outputFileType = AVFileTypeQuickTimeMovie
+        self.session.videoComposition = composition
+    }
+    
+    
+    func render(complete: @escaping (_ url: URL?) -> ()) {
+        let group = DispatchGroup()
+        group.enter()
+        DispatchQueue.global(qos: .utility).async(group: group) {
+            self.session.exportAsynchronously {
+                group.leave()
+                DispatchQueue.main.async {
+                    complete(self.session.outputURL)
+                }
+            }
+            self.progress(session: self.session, group: group)
+        }
+    }
+    
+    /**
+     Polls the AVAssetExportSession status every 500 milliseconds.
+     
+     - Parameter session: AVAssetExportSession
+     - Parameter group: DispatchGroup
+     */
+    private func progress(session: AVAssetExportSession, group: DispatchGroup) {
+        while session.status == .waiting || session.status == .exporting {
+            progress?(session.progress)
+            _ = group.wait(timeout: DispatchTime.now() + .milliseconds(500))
+        }
+        
+    }
+    
+    
+}
+/// Provides an easy way to detemine if the video was taken in landscape or portrait.
+fileprivate struct Transform {
+    
+    fileprivate let transform: CGAffineTransform
+    
+    init(_ transform: CGAffineTransform) {
+        self.transform = transform
+    }
+    
+    var isPortrait: Bool {
+        guard transform.a == 0 && transform.d == 0 else { return false }
+        switch (transform.b, transform.c) {
+        case(1.0,-1.0): return true
+        case(-1.0,1.0): return true
+        default: return false
+        }
+    }
+}
+
+fileprivate struct Size {
+    fileprivate let isPortrait: Bool
+    fileprivate let size: CGSize
+    
+    var naturalSize: CGSize {
+        return isPortrait ? CGSize(width: size.height, height: size.width) : size
+    }
+}
+
+
+/// Configuration struct.  Open for extension.
+struct MergeConfiguration {
+    let frameRate: Int32
+    let directory: String
+    let quality: Quality
+    let placement: Placement
+    
+}
+
+extension MergeConfiguration {
+    
+    static var standard: MergeConfiguration {
+        return MergeConfiguration(frameRate: 30, directory: NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0], quality: Quality.high, placement: Placement.stretchFit)
     }
 }
