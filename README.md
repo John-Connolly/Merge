@@ -33,8 +33,8 @@ situations for adding drawing to a video.
 
 ```swift 
 enum Placement {
-case stretchFit
-case custom(x: CGFloat, y: CGFloat, size: CGSize)
+  case stretchFit
+  case custom(x: CGFloat, y: CGFloat, size: CGSize)
 }
 ```
 
