@@ -27,7 +27,7 @@ extension MergeConfiguration {
 ```
 #### Placement
 - stretchFit:  Stretches the ovelay to cover the entire video frame. This is ideal for
-situations for adding drawing to a video.
+situations like adding drawing to a video.
 
 - custom: Custom coordinates for the ovelay and size for the overlay. 
 
