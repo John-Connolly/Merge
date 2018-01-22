@@ -35,16 +35,18 @@ final class Merge {
                       overlayImage: UIImage,
                       completion: @escaping (_ URL: URL?) -> Void,
                       progressHandler: @escaping (_ progress: Float) -> Void) {
-        let tracks = video.tracks(withMediaType: AVMediaTypeVideo)
-        guard !tracks.isEmpty else { return }
-        let track = tracks[0]
-        let compositionTry = try? Composition(duration: video.duration, videoAsset: track)
+        let videoTracks = video.tracks(withMediaType: AVMediaTypeVideo)
+        guard !videoTracks.isEmpty else { return }
+        let videoTrack = videoTracks[0]
+
+        let audioTracks = video.tracks(withMediaType: AVMediaTypeAudio)
+        let audioTrack = audioTracks.isEmpty ? nil : audioTracks[0]
+        let compositionTry = try? Composition(duration: video.duration, videoAsset: videoTrack, audioAsset: audioTrack)
 
         guard let composition = compositionTry else { return }
 
-        let videoTrack = video.tracks(withMediaType: AVMediaTypeVideo)[0]
         let videoTransform = Transform(videoTrack.preferredTransform)
-        let layerInstruction = LayerInstruction(track: composition.track, transform: videoTrack.preferredTransform, duration: video.duration)
+        let layerInstruction = LayerInstruction(track: composition.videoTrack, transform: videoTrack.preferredTransform, duration: video.duration)
         let instruction = Instruction(length: video.duration, layerInstructions: [layerInstruction.instruction])
         let size = Size(isPortrait: videoTransform.isPortrait, size: videoTrack.naturalSize)
         let layer = Layer(overlay: overlayImage, size: size.naturalSize, placement: configuration.placement)
@@ -123,15 +125,23 @@ fileprivate final class LayerInstruction {
 fileprivate final class Composition {
 
     let asset = AVMutableComposition()
-    let track: AVMutableCompositionTrack
+    let videoTrack: AVMutableCompositionTrack
+    var audioTrack: AVMutableCompositionTrack?
 
-    init(duration: CMTime, videoAsset: AVAssetTrack) throws {
-        track = asset.addMutableTrack(withMediaType: AVMediaTypeVideo,
-                                      preferredTrackID: Int32(kCMPersistentTrackID_Invalid)
-        )
-        try track.insertTimeRange(CMTimeRangeMake(kCMTimeZero, duration),
-                                  of: videoAsset,
-                                  at: kCMTimeZero)
+    init(duration: CMTime, videoAsset: AVAssetTrack, audioAsset: AVAssetTrack? = nil) throws {
+        videoTrack = asset.addMutableTrack(withMediaType: AVMediaTypeVideo,
+                                           preferredTrackID: Int32(kCMPersistentTrackID_Invalid))
+        try videoTrack.insertTimeRange(CMTimeRangeMake(kCMTimeZero, duration),
+                                       of: videoAsset,
+                                       at: kCMTimeZero)
+
+        if let audioAsset = audioAsset {
+            audioTrack = asset.addMutableTrack(withMediaType: AVMediaTypeAudio,
+                                               preferredTrackID: Int32(kCMPersistentTrackID_Invalid))
+            try audioTrack?.insertTimeRange(CMTimeRangeMake(kCMTimeZero, duration),
+                                            of: audioAsset,
+                                            at: kCMTimeZero)
+        }
     }
 
 }
